@@ -1,18 +1,14 @@
 from langchain_community.vectorstores import FAISS
 from langchain_openai.chat_models import ChatOpenAI
 from langchain_openai import OpenAIEmbeddings
-from databricks_langchain import ChatDatabricks, DatabricksEmbeddings
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, SystemMessagePromptTemplate
 from langgraph.graph import MessagesState, StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 from dotenv import load_dotenv
 load_dotenv()
 
-#llm = ChatDatabricks(temperature=0, endpoint="databricks-dbrx-instruct")
-llm = ChatOpenAI(model="gpt-3.5-turbo")
+llm = ChatOpenAI(model="gpt-4o-mini")
 
-
-#embeddings = DatabricksEmbeddings(endpoint="databricks-bge-large-en")
 embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 
 # サンプルデータをベクトルストアに追加

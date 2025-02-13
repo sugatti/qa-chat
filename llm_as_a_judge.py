@@ -1,40 +1,30 @@
+from langchain.text_splitter import CharacterTextSplitter
+from langchain_community.vectorstores import FAISS
 from langchain_community.document_loaders import WebBaseLoader
-from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langsmith import Client, traceable
 from typing_extensions import Annotated, TypedDict
+from dotenv import load_dotenv
+load_dotenv()
 
-# List of URLs to load documents from
-urls = [
-    "https://lilianweng.github.io/posts/2023-06-23-agent/",
-    "https://lilianweng.github.io/posts/2023-03-15-prompt-engineering/",
-    "https://lilianweng.github.io/posts/2023-10-25-adv-attack-llm/",
-]
 
-# Load documents from the URLs
-docs = [WebBaseLoader(url).load() for url in urls]
-docs_list = [item for sublist in docs for item in sublist]
-
-# Initialize a text splitter with specified chunk size and overlap
-text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
-    chunk_size=250, chunk_overlap=0
+loader = WebBaseLoader(
+    web_path="https://www.clue-tec.com",
 )
-
-# Split the documents into chunks
-doc_splits = text_splitter.split_documents(docs_list)
-
-# Add the document chunks to the "vector store" using OpenAIEmbeddings
-vectorstore = InMemoryVectorStore.from_documents(
-    documents=doc_splits,
-    embedding=OpenAIEmbeddings(),
+pages = loader.load()
+text_splitter = CharacterTextSplitter(
+    chunk_size=200, 
+    separator='', 
+    chunk_overlap=50
 )
+documents = text_splitter.split_documents(pages)
 
-# With langchain we can easily turn any vector store into a retrieval component:
-retriever = vectorstore.as_retriever(k=6)
+embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 
-llm = ChatOpenAI(model="gpt-4o", temperature=1)
+faiss_index = FAISS.from_documents(documents, embeddings)
+retriever = faiss_index.as_retriever(search_kwargs={"k": 3})
 
+llm = ChatOpenAI(model="gpt-4o-mini")
 
 # Add decorator so this function is traced in LangSmith
 @traceable()
@@ -42,15 +32,19 @@ def rag_bot(question: str) -> dict:
     # langchain Retriever will be automatically traced
     docs = retriever.invoke(question)
 
-    docs_string = "".join(doc.page_content for doc in docs)
+    context = "".join(doc.page_content for doc in docs)
     instructions = f"""
-    You are a helpful assistant who is good at analyzing source information and answering questions.       
-    Use the following source documents to answer the user's questions.       
-    If you don't know the answer, just say that you don't know.       
-    Use three sentences maximum and keep the answer concise.
-
-Documents:
-{docs_string}"""
+あなたは質問応答タスクのアシスタントです。
+検索された以下の文脈と会話履歴の一部を使って質問に丁寧に答えてください。
+答えがわからなければ、わからないと答えてください。
+最大で3つの文章を使い、簡潔な回答を心がけてください。
+日本語で回答してください。
+                                                                  
+文脈:
+====
+{context}
+====
+"""
     # langchain ChatModel will be automatically traced
     ai_msg = llm.invoke(
         [
@@ -61,27 +55,21 @@ Documents:
 
     return {"answer": ai_msg.content, "documents": docs}
 
-
 client = Client()
-
 # Define the examples for the dataset
 examples = [
     (
-        "How does the ReAct agent use self-reflection? ",
-        "ReAct integrates reasoning and acting, performing actions - such tools like Wikipedia search API - and then observing / reasoning about the tool outputs.",
+        "須賀秀和はどのようなサービスを導入しましたか？",
+        "DatabricksやFivetranとSnowflake、dbtのモダンデータスタックによるデータ分析基盤を導入しました",
     ),
     (
-        "What are the types of biases that can arise with few-shot prompting?",
-        "The biases that can arise with few-shot prompting include (1) Majority label bias, (2) Recency bias, and (3) Common token bias.",
-    ),
-    (
-        "What are five types of adversarial attacks?",
-        "Five types of adversarial attacks are (1) Token manipulation, (2) Gradient based attack, (3) Jailbreak prompting, (4) Human red-teaming, (5) Model red-teaming.",
+        "須賀秀和が支援している業務は何ですか？",
+        "分散システムの開発やデータ分析基盤の導入を技術面から支援しています",
     ),
 ]
 
 # Create the dataset and examples in LangSmith
-dataset_name = "Lilian Weng Blogs Q&A"
+dataset_name = "example datasets"
 if not client.has_dataset(dataset_name=dataset_name):
     dataset = client.create_dataset(dataset_name=dataset_name)
     client.create_examples(
@@ -89,7 +77,6 @@ if not client.has_dataset(dataset_name=dataset_name):
         outputs=[{"answer": a} for _, a in examples],
         dataset_id=dataset.id,
     )
-
 
 # Grade output schema
 class CorrectnessGrade(TypedDict):
@@ -119,7 +106,7 @@ Explain your reasoning in a step-by-step manner to ensure your reasoning and con
 Avoid simply stating the correct answer at the outset."""
 
 # Grader LLM
-grader_llm = ChatOpenAI(model="gpt-4o", temperature=0).with_structured_output(
+grader_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0).with_structured_output(
     CorrectnessGrade, method="json_schema", strict=True
 )
 
@@ -138,7 +125,6 @@ STUDENT ANSWER: {outputs['answer']}"""
         ]
     )
     return grade["correct"]
-
 
 # Grade output schema
 class RelevanceGrade(TypedDict):
@@ -166,7 +152,7 @@ Explain your reasoning in a step-by-step manner to ensure your reasoning and con
 Avoid simply stating the correct answer at the outset."""
 
 # Grader LLM
-relevance_llm = ChatOpenAI(model="gpt-4o", temperature=0).with_structured_output(
+relevance_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0).with_structured_output(
     RelevanceGrade, method="json_schema", strict=True
 )
 
@@ -211,7 +197,7 @@ Explain your reasoning in a step-by-step manner to ensure your reasoning and con
 Avoid simply stating the correct answer at the outset."""
 
 # Grader LLM
-grounded_llm = ChatOpenAI(model="gpt-4o", temperature=0).with_structured_output(
+grounded_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0).with_structured_output(
     GroundedGrade, method="json_schema", strict=True
 )
 
@@ -261,9 +247,8 @@ Avoid simply stating the correct answer at the outset."""
 
 # Grader LLM
 retrieval_relevance_llm = ChatOpenAI(
-    model="gpt-4o", temperature=0
+    model="gpt-4o-mini", temperature=0
 ).with_structured_output(RetrievalRelevanceGrade, method="json_schema", strict=True)
-
 
 def retrieval_relevance(inputs: dict, outputs: dict) -> bool:
     """An evaluator for document relevance"""
@@ -289,9 +274,6 @@ experiment_results = client.evaluate(
     target,
     data=dataset_name,
     evaluators=[correctness, groundedness, relevance, retrieval_relevance],
-    experiment_prefix="rag-doc-relevance",
-    metadata={"version": "LCEL context, gpt-4-0125-preview"},
+    experiment_prefix="clue-tec",
+    metadata={"version": "LCEL context, gpt-4o-mini"},
 )
-
-# Explore results locally as a dataframe if you have pandas installed
-# experiment_results.to_pandas()
