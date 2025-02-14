@@ -14,7 +14,7 @@ loader = WebBaseLoader(
 pages = loader.load()
 text_splitter = CharacterTextSplitter(
     chunk_size=200, 
-    separator='', 
+    separator='\n', 
     chunk_overlap=50
 )
 documents = text_splitter.split_documents(pages)
