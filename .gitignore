@@ -171,3 +171,4 @@ cython_debug/
 .pypirc
 
 .chroma_db/
+.chroma_db_bge-m3/
